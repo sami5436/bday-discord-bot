@@ -19,6 +19,7 @@ const RESPONSE_CHANNEL_MESSAGE = 4;
 
 // Ephemeral flag (visible only to command invoker)
 const EPHEMERAL = 1 << 6;
+const SIGNATURE_MAX_SKEW_SECONDS = 5 * 60;
 
 // Basic month/day validation map (Feb allows 29)
 const DAYS_IN_MONTH = [
@@ -51,6 +52,16 @@ export default {
 
     if (!signature || !timestamp) {
       return new Response("Missing signature", { status: 401 });
+    }
+
+    // Reject old/replayed requests by checking timestamp skew
+    const timestampSeconds = Number(timestamp);
+    if (!Number.isFinite(timestampSeconds)) {
+      return new Response("Bad signature timestamp", { status: 401 });
+    }
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (Math.abs(nowSeconds - timestampSeconds) > SIGNATURE_MAX_SKEW_SECONDS) {
+      return new Response("Stale signature timestamp", { status: 401 });
     }
 
     const isValid = await verifyDiscordSignature({
@@ -173,6 +184,10 @@ function parseAddOptions(options: any[]): { name: string; birthday: string; erro
 
   if (!name) {
     return { name, birthday, error: "Missing name. Usage: /add <name> <birthday>" };
+  }
+
+  if (name.length > 100) {
+    return { name, birthday, error: "Name is too long (max 100 characters)." };
   }
 
   if (!birthday) {
