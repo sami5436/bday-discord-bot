@@ -1,0 +1,5 @@
+# Cloudflare Wrangler local config
+wrangler.toml
+# Local env files
+.env
+
