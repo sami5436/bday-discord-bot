@@ -1,0 +1,12 @@
+name = "bday-discord-bot"
+main = "worker/index.ts"
+compatibility_date = "2025-12-31"
+
+# These are regular (non-secret) vars. Keep secrets in `wrangler secret put`.
+[vars]
+SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
+
+# Secrets to set via CLI:
+# wrangler secret put DISCORD_PUBLIC_KEY
+# wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# (Bot token is not needed by the Worker; only the GitHub Action uses it.)
