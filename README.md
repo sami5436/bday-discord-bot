@@ -12,6 +12,17 @@ This project implements a DM-only Discord birthday reminder system with:
 - `sql/schema.sql` — Supabase schema
 - `scripts/send_reminders.py` — Daily reminder sender (Python)
 - `.github/workflows/daily-reminder.yml` — Scheduled GitHub Action
+- `docs/README.md` — Project documentation hub
+
+## Docs
+
+- `docs/README.md` — Documentation index
+- `docs/discord-bot-basics.md` — How Discord bots and interactions work
+- `docs/workflow-logic.md` — End-to-end workflow logic
+- `docs/cloudflare-workers-wrangler.md` — Cloudflare Workers, Wrangler, and cost/usage notes
+- `docs/supabase.md` — Supabase usage in this project
+- `docs/python-reminder-script.md` — Daily reminder job details
+- `docs/worker-index.md` — Worker implementation details
 
 ## Environment Variables
 
