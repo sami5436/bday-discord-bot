@@ -106,22 +106,6 @@ export default {
       });
     }
 
-    const commandName = interaction?.data?.name;
-    if (commandName !== "add") {
-      return json({
-        type: RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "Unknown command." },
-      });
-    }
-
-    const { name, birthday, error } = parseAddOptions(interaction?.data?.options ?? []);
-    if (error) {
-      return json({
-        type: RESPONSE_CHANNEL_MESSAGE,
-        data: { content: error },
-      });
-    }
-
     const userId = interaction?.user?.id ?? interaction?.member?.user?.id;
     if (!userId) {
       return json({
@@ -130,37 +114,111 @@ export default {
       });
     }
 
-    const validation = validateBirthday(birthday);
-    if (!validation.ok) {
+    const commandName = interaction?.data?.name;
+
+    if (commandName === "add") {
+      const { name, birthday, error } = parseAddOptions(interaction?.data?.options ?? []);
+      if (error) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: error },
+        });
+      }
+
+      const validation = validateBirthday(birthday);
+      if (!validation.ok) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: validation.error },
+        });
+      }
+
+      const { month, day } = validation;
+
+      // Upsert into Supabase using PostgREST
+      const upsertResult = await upsertBirthday({
+        env,
+        owner_user_id: userId,
+        name,
+        month,
+        day,
+      });
+
+      if (!upsertResult.ok) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "Failed to save birthday. Please try again." },
+        });
+      }
+
       return json({
         type: RESPONSE_CHANNEL_MESSAGE,
-        data: { content: validation.error },
+        data: {
+          content: `Saved ${name}'s birthday as ${birthday}.`,
+        },
       });
     }
 
-    const { month, day } = validation;
+    if (commandName === "list") {
+      const list = await listBirthdays({ env, owner_user_id: userId });
+      if (!list.ok) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "Failed to fetch birthdays. Please try again." },
+        });
+      }
 
-    // Upsert into Supabase using PostgREST
-    const upsertResult = await upsertBirthday({
-      env,
-      owner_user_id: userId,
-      name,
-      month,
-      day,
-    });
+      if (list.items.length === 0) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "You have no birthdays saved yet." },
+        });
+      }
 
-    if (!upsertResult.ok) {
+      const lines = list.items
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((row) => `${row.name}: ${pad2(row.month)}/${pad2(row.day)}`)
+        .join("\n");
+
       return json({
         type: RESPONSE_CHANNEL_MESSAGE,
-        data: { content: "Failed to save birthday. Please try again." },
+        data: { content: `Your saved birthdays:\n${lines}` },
+      });
+    }
+
+    if (commandName === "remove") {
+      const { name, error } = parseRemoveOptions(interaction?.data?.options ?? []);
+      if (error) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: error },
+        });
+      }
+
+      const removed = await removeBirthday({ env, owner_user_id: userId, name });
+      if (!removed.ok) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: "Failed to remove birthday. Please try again." },
+        });
+      }
+
+      if (removed.deletedCount === 0) {
+        return json({
+          type: RESPONSE_CHANNEL_MESSAGE,
+          data: { content: `No birthday found for ${name}.` },
+        });
+      }
+
+      return json({
+        type: RESPONSE_CHANNEL_MESSAGE,
+        data: { content: `Removed ${name} from your birthdays.` },
       });
     }
 
     return json({
       type: RESPONSE_CHANNEL_MESSAGE,
-      data: {
-        content: `Saved ${name}'s birthday as ${birthday}.`,
-      },
+      data: { content: "Unknown command." },
     });
   },
 };
@@ -195,6 +253,27 @@ function parseAddOptions(options: any[]): { name: string; birthday: string; erro
   }
 
   return { name, birthday };
+}
+
+// Parse /remove options into name
+function parseRemoveOptions(options: any[]): { name: string; error?: string } {
+  let name = "";
+
+  for (const opt of options) {
+    if (opt?.name === "name") {
+      name = String(opt.value ?? "").trim();
+    }
+  }
+
+  if (!name) {
+    return { name, error: "Missing name. Usage: /remove <name>" };
+  }
+
+  if (name.length > 100) {
+    return { name, error: "Name is too long (max 100 characters)." };
+  }
+
+  return { name };
 }
 
 // Validate MM/DD input and return parsed month/day
@@ -248,6 +327,67 @@ async function upsertBirthday(params: {
   });
 
   return { ok: res.ok };
+}
+
+// List birthdays for a user
+async function listBirthdays(params: {
+  env: Env;
+  owner_user_id: string;
+}): Promise<{ ok: boolean; items: Array<{ name: string; month: number; day: number }> }> {
+  const { env, owner_user_id } = params;
+
+  const url = new URL(`${env.SUPABASE_URL}/rest/v1/birthdays`);
+  url.searchParams.set("select", "name,month,day");
+  url.searchParams.set("owner_user_id", `eq.${owner_user_id}`);
+
+  const res = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+  });
+
+  if (!res.ok) {
+    return { ok: false, items: [] };
+  }
+
+  const items = await res.json();
+  return { ok: true, items };
+}
+
+// Remove a birthday for a user/name
+async function removeBirthday(params: {
+  env: Env;
+  owner_user_id: string;
+  name: string;
+}): Promise<{ ok: boolean; deletedCount: number }> {
+  const { env, owner_user_id, name } = params;
+
+  const url = new URL(`${env.SUPABASE_URL}/rest/v1/birthdays`);
+  url.searchParams.set("owner_user_id", `eq.${owner_user_id}`);
+  url.searchParams.set("name", `eq.${encodeURIComponent(name)}`);
+
+  const res = await fetch(url.toString(), {
+    method: "DELETE",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+      Prefer: "return=representation",
+    },
+  });
+
+  if (!res.ok) {
+    return { ok: false, deletedCount: 0 };
+  }
+
+  const rows = await res.json();
+  return { ok: true, deletedCount: Array.isArray(rows) ? rows.length : 0 };
+}
+
+// Pad a number to 2 digits
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 // Verify Discord interaction signature using Ed25519
